@@ -73,6 +73,7 @@ public class JoinWalker {
 
 	protected String[] suffixes;
 	protected String[] collectionSuffixes;
+	protected String[] eagerCollectionSuffixes;
 	protected Loadable[] persisters;
 	protected int[] owners;
 	protected EntityType[] ownerAssociationTypes;
@@ -920,6 +921,21 @@ public class JoinWalker {
 		}
 		return result;
 	}
+
+	protected static final int countEagerCollections(List associations)
+	throws MappingException {
+		int result = 0;
+		Iterator iter = associations.iterator();
+		while ( iter.hasNext() ) {
+			OuterJoinableAssociation oj = (OuterJoinableAssociation) iter.next();
+			if ( oj.getJoinType()==JoinType.INNER_JOIN &&
+					oj.getJoinable().isCollection() &&
+					oj.hasRestriction() ) {
+				result++;
+			}
+		}
+		return result;
+	}
 	
 	/**
 	 * Get the order by string required for collection fetching
@@ -1018,10 +1034,12 @@ public class JoinWalker {
 			final AssociationInitCallback callback) throws MappingException {
 		final int joins = countEntityPersisters(associations);
 		final int collections = countCollectionPersisters(associations);
+		final int eagerCollections = countEagerCollections(associations);
 
 		collectionOwners = collections==0 ? null : new int[collections];
 		collectionPersisters = collections==0 ? null : new CollectionPersister[collections];
 		collectionSuffixes = BasicLoader.generateSuffixes( joins + 1, collections );
+		eagerCollectionSuffixes = BasicLoader.generateSuffixes( joins + collections + 1, eagerCollections );
 
 		this.lockOptions = lockOptions;
 
@@ -1084,6 +1102,7 @@ public class JoinWalker {
 			StringBuilder buf = new StringBuilder( associations.size() * 100 );
 			int entityAliasCount=0;
 			int collectionAliasCount=0;
+			int eagerCollectionAliasCount=0;
 			for ( int i=0; i<associations.size(); i++ ) {
 				OuterJoinableAssociation join = (OuterJoinableAssociation) associations.get(i);
 				OuterJoinableAssociation next = (i == associations.size() - 1)
@@ -1096,12 +1115,15 @@ public class JoinWalker {
 				final String collectionSuffix = ( collectionSuffixes == null || collectionAliasCount >= collectionSuffixes.length )
 				        ? null
 				        : collectionSuffixes[collectionAliasCount];
+				final String eagerCollectionSuffix = ( eagerCollectionSuffixes == null || eagerCollectionAliasCount >= eagerCollectionSuffixes.length )
+				        ? null
+				        : eagerCollectionSuffixes[eagerCollectionAliasCount];
 				final String selectFragment = joinable.selectFragment(
 						next == null ? null : next.getJoinable(),
 						next == null ? null : next.getRHSAlias(),
 						join.getRHSAlias(),
 						entitySuffix,
-				        collectionSuffix,
+				        join.getJoinType()==JoinType.LEFT_OUTER_JOIN ? collectionSuffix : eagerCollectionSuffix,
 						join.getJoinType()==JoinType.LEFT_OUTER_JOIN
 				);
 				if (selectFragment.trim().length() > 0) {
@@ -1109,6 +1131,7 @@ public class JoinWalker {
 				}
 				if ( joinable.consumesEntityAlias() ) entityAliasCount++;
 				if ( joinable.consumesCollectionAlias() && join.getJoinType()==JoinType.LEFT_OUTER_JOIN ) collectionAliasCount++;
+				if ( joinable.consumesCollectionAlias() && join.getJoinType()==JoinType.INNER_JOIN ) eagerCollectionAliasCount++;
 			}
 			return buf.toString();
 		}
